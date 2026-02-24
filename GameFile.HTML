@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Exponential Money Wheel (Outcome + Years Wheel)</title>
+  <style>
+    :root { --bg:#0b1020; --card:#121a33; --text:#e7ecff; --muted:#a8b3e6; --accent:#7aa2ff; --good:#2ee59d; --bad:#ff5a7a; --warn:#ffd166; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background:var(--bg); color:var(--text); }
+    .wrap { max-width: 1300px; margin: 0 auto; padding: 20px; display:grid; gap:16px; grid-template-columns: 560px 1fr; }
+    @media (max-width: 1150px){ .wrap{ grid-template-columns: 1fr; } }
+
+    .card { background:var(--card); border:1px solid rgba(255,255,255,.08); border-radius: 14px; padding:16px; box-shadow: 0 10px 30px rgba(0,0,0,.3); }
+    h1 { font-size: 18px; margin:0 0 10px; }
+    .money { font-size: 28px; font-weight: 800; letter-spacing: .3px; }
+    .muted { color: var(--muted); font-size: 13px; }
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .rowBetween { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
+    button {
+      appearance:none; border:0; border-radius: 10px; padding: 10px 12px;
+      background: var(--accent); color: #08102a; font-weight: 800; cursor: pointer;
+    }
+    button:disabled { opacity:.45; cursor:not-allowed; }
+    .btn2 { background: transparent; border:1px solid rgba(255,255,255,.18); color: var(--text); font-weight: 700; }
+    .pill { font-size: 12px; padding: 6px 10px; border-radius: 999px; border:1px solid rgba(255,255,255,.18); color: var(--muted); }
+    .status { font-weight: 800; }
+    .status.good { color: var(--good); }
+    .status.bad { color: var(--bad); }
+    .status.warn { color: var(--warn); }
+
+    .wheelWrap { display:grid; place-items:center; position:relative; padding: 8px 0 2px; }
+    .wheelSmallWrap { display:grid; place-items:center; position:relative; padding: 6px 0 0; }
+    canvas { background: transparent; }
+    .pointer {
+      position:absolute; top: 4px; width:0; height:0;
+      border-left: 14px solid transparent;
+      border-right: 14px solid transparent;
+      border-bottom: 22px solid var(--warn);
+      filter: drop-shadow(0 6px 10px rgba(0,0,0,.35));
+    }
+    .pointerSmall {
+      position:absolute; top: 2px; width:0; height:0;
+      border-left: 10px solid transparent;
+      border-right: 10px solid transparent;
+      border-bottom: 16px solid var(--warn);
+      filter: drop-shadow(0 6px 10px rgba(0,0,0,.35));
+    }
+
+    label { display:block; font-size: 12px; color: var(--muted); margin: 12px 0 6px; }
+    input[type="text"], input[type="number"] {
+      width: 100%; padding: 10px 10px; border-radius: 10px;
+      background: rgba(255,255,255,.06); color: var(--text);
+      border:1px solid rgba(255,255,255,.12);
+      outline:none;
+    }
+
+    .history { max-height: 310px; overflow:auto; border-radius: 12px; border:1px solid rgba(255,255,255,.08); }
+    table { width:100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 10px; border-bottom:1px solid rgba(255,255,255,.08); vertical-align: top; }
+    th { text-align:left; position: sticky; top:0; background: #0f1730; z-index: 1; }
+
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .bigMono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 14px; }
+    .kpi { display:flex; gap:10px; flex-wrap:wrap; }
+    .kpi > div { flex: 1; min-width: 190px; }
+    .box { border:1px solid rgba(255,255,255,.10); border-radius: 12px; padding: 10px; background: rgba(255,255,255,.04); }
+    .small { font-size: 12px; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Exponential Money Wheel</h1>
+      <div class="money" id="moneyDisplay">$1,000,000.00</div>
+      <div class="muted">
+        Step 1: Spin an outcome.<br/>
+        Step 2: Spin years (weighted so 2–5 is most common).<br/>
+        Step 3: Write the equation and compute the new balance (nearest cent). Must be correct to continue.
+      </div>
+
+      <!-- Main outcome wheel (20% larger) -->
+      <div class="wheelWrap">
+        <div class="pointer" aria-hidden="true"></div>
+        <canvas id="wheel" width="456" height="456"></canvas>
+      </div>
+
+      <div class="row" style="margin-top:6px;">
+        <button id="spinBtn">SPIN OUTCOME</button>
+        <button class="btn2" id="spinYearsBtn" disabled>SPIN YEARS</button>
+        <button class="btn2" id="resetBtn" title="Shuffle outcomes + reset money">Reset</button>
+        <span class="pill" id="turnPill">Spins: 0</span>
+      </div>
+
+      <div class="box" style="margin-top:10px;">
+        <div class="muted">Current outcome:</div>
+        <div class="bigMono" id="resultLine">Spin to begin.</div>
+      </div>
+
+      <!-- (2) Small years wheel -->
+      <div class="box" style="margin-top:10px;">
+        <div class="rowBetween">
+          <div>
+            <div class="muted">Years wheel (weighted)</div>
+            <div class="small">2–5 show up much more often than 1 or 6.</div>
+          </div>
+          <div class="pill">Years: <span class="mono" id="yearsText">—</span></div>
+        </div>
+
+        <div class="wheelSmallWrap">
+          <div class="pointerSmall" aria-hidden="true"></div>
+          <canvas id="yearsWheel" width="240" height="240"></canvas>
+        </div>
+      </div>
+
+      <!-- (1) Static equation template -->
+      <div class="box" style="margin-top:10px;">
+        <div class="muted">Equation template:</div>
+        <div class="bigMono">y = a(b)<sup>x</sup></div>
+        <div class="small">a = current money, b = growth/decay factor, x = years.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="kpi">
+        <div>
+          <div class="muted">Accuracy</div>
+          <div class="mono">Nearest cent</div>
+        </div>
+        <div>
+          <div class="muted">Status</div>
+          <div class="status" id="statusText">—</div>
+        </div>
+        <div>
+          <div class="muted">Total years invested</div>
+          <div class="mono" id="totalYearsText">0</div>
+        </div>
+      </div>
+
+      <label for="eqInput" style="margin-top:12px;">Student equation (fill in):</label>
+      <input id="eqInput" type="text" placeholder="Example: y = 1000000(1.18)^4" />
+
+      <label for="balInput">New balance (nearest cent):</label>
+      <input id="balInput" type="number" inputmode="decimal" step="0.01" placeholder="Example: 1939388.16" />
+
+      <div class="row" style="margin-top:12px;">
+        <button id="checkBtn" disabled>Check Answer</button>
+        <button id="applyBtn" disabled>Apply & Next Spin</button>
+        <span class="muted" id="hintText"></span>
+      </div>
+
+      <div style="margin-top:14px">
+        <h1 style="margin:0 0 8px">History</h1>
+        <div class="history">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:70px;">Spin</th>
+                <th style="width:70px;">Years</th>
+                <th>Outcome</th>
+                <th>Expected</th>
+                <th>Student</th>
+              </tr>
+            </thead>
+            <tbody id="histBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+/** =========================================
+ *  Stories as provided
+ *  ========================================= */
+const storyBank = [
+  { title:"Tech Titan Trust", text:"You invested in big tech, and now your money is growing faster than your grandma’s confusion with her new iPhone. Every time a company releases a slightly different version of the same phone, your portfolio jumps by 18% annually.", percent:18, type:"growth" },
+  { title:"Space Bucks Fund", text:"Turns out rockets are a great investment! Every time a billionaire launches a car into orbit just for fun, your money gains 22% per year. Next stop? Buying your own space station!", percent:22, type:"growth" },
+  { title:"Social Media Madness", text:"You wisely invested in social media companies, and now your money is trending #Winning. The only downside? Your bank account now has a pop-up ad every time you check your balance. Enjoy your 15% yearly gain!", percent:15, type:"growth" },
+  { title:"Crypto Chaos Fund", text:"You wake up and—BOOM—your investment just skyrocketed 30% overnight! Or wait… now it dropped 40%. Investing in crypto is like playing a game where the rules change every five minutes—but when it works, you’re rolling in digital dough!", percent:30, type:"growth" },
+  { title:"Electric Avenue Investments", text:"Gas prices are through the roof, and everyone wants an electric car. Lucky for you, your Tesla stock just surged 20% this year! You can finally afford… a luxury golf cart (but still not a Tesla).", percent:20, type:"growth" },
+  { title:"Fast Food Fortune", text:"The world is addicted to fries, and your money is sizzling! Every time a fast-food chain releases a bizarre new menu item (Pumpkin Spice Chicken Nuggets, anyone?), your investment grows by 12% per year.", percent:12, type:"growth" },
+  { title:"Streaming Service Surge", text:"You invested in Netflix, Disney+, and other streaming giants, and now your bank account binges on profits! Every time someone forgets to cancel their free trial, you gain 17% per year. Thank you, forgetful subscribers!", percent:17, type:"growth" },
+  { title:"Gaming Goldmine", text:"Video games now make more money than Hollywood, and you’re cashing in! Your investment gains 14% annually as players keep spending $200 on digital outfits for their characters. Who needs real clothes anyway?", percent:14, type:"growth" },
+  { title:"Fitness Fad Fund", text:"A new trendy workout just dropped, and suddenly everyone is flipping tires and doing goat yoga. Thanks to fitness fads, your investment is bulking up by 10% per year! Who needs weights when peer pressure does the work?", percent:10, type:"growth" },
+  { title:"Artificial Intelligence Advantage", text:"AI is taking over, and your bank account is proof. Every time someone asks ChatGPT a weird question (like \"Can AI write my breakup text?\"), you gain 25% per year. The robots are making you rich!", percent:25, type:"growth" },
+
+  { title:"Old Car Blues", text:"You thought buying a used car was a smart investment—until it started breaking down every two weeks. After new tires, a battery, and whatever a catalytic converter is, your savings shrink by 10% annually.", percent:10, type:"decay" },
+  { title:"Streaming Subscription Spiral", text:"You swear you only subscribed to a couple of streaming services… until you check your account. With auto-renewals and \"free trials\" you forgot about, your money slowly vanishes by 8% a year—just like the shows they randomly cancel.", percent:8, type:"decay" },
+  { title:"Gourmet Coffee Habit", text:"You need your daily oat milk caramel double-shot espresso to function, but your bank account is running on decaf. With each fancy drink, you lose 12% of your money per year—and now you can’t even afford a coffee maker at home.", percent:12, type:"decay" },
+  { title:"Fast Fashion Fiasco", text:"You bought way too many trendy outfits, and now half of them are already out of style. 15% of your fortune disappears yearly, and the only thing left is a closet full of \"what was I thinking?\" purchases.", percent:15, type:"decay" },
+  { title:"Latest iPhone Addiction", text:"You just upgraded to the newest iPhone… but guess what? Another one drops in six months. Each time you trade in a perfectly good phone for the \"latest and greatest,\" your wealth shrinks by 18% annually.", percent:18, type:"decay" },
+  { title:"Impulse Buy Black Hole", text:"That one-click \"Add to Cart\" button is dangerous. From mini waffle makers to LED light-up shoelaces, your impulse shopping is sucking up 20% of your money every year. And no, you don’t need another blanket hoodie.", percent:20, type:"decay" },
+  { title:"Concert & Festival Fever", text:"You spent big on festival tickets, merch, and a $20 hot dog. Your finances are dropping by 9% annually, but at least you got one blurry video of your favorite band to relive the experience.", percent:9, type:"decay" },
+  { title:"Gamer’s Regret", text:"You pre-ordered every new game, but your backlog is so big, you’ll never finish them all. As the gaming industry pumps out expensive downloadable content, 14% of your money is gone each year—and your unplayed games stare at you in shame.", percent:14, type:"decay" },
+  { title:"Pet Pampering Fund", text:"Your pet is living like royalty—wearing designer collars and eating organic, grass-fed, gourmet meals. Meanwhile, 11% of your money disappears annually—and your cat still ignores you most of the time.", percent:11, type:"decay" },
+  { title:"Luxury Car Lease Trap", text:"You wanted a fancy ride to impress people. But with sky-high payments, insurance, and repairs, 22% of your fortune evaporates each year. Now, you're broke—but hey, at least your car selfies look amazing.", percent:22, type:"decay" },
+];
+
+/** =========================================
+ *  Game state
+ *  ========================================= */
+let mappingByIndex = []; // 20 stories, shuffled
+let money = 1_000_000.00;
+let spins = 0;
+
+let currentIndex = null;     // 0..19
+let currentStory = null;
+
+let years = null;            // chosen by years wheel
+let expected = null;         // correct balance (rounded cents)
+let lockedUntilCorrect = false;
+
+let totalYearsInvested = 0;
+
+/** ========= DOM ========= */
+const moneyDisplay = document.getElementById("moneyDisplay");
+const turnPill = document.getElementById("turnPill");
+const resultLine = document.getElementById("resultLine");
+
+const spinBtn = document.getElementById("spinBtn");
+const spinYearsBtn = document.getElementById("spinYearsBtn");
+const resetBtn = document.getElementById("resetBtn");
+const checkBtn = document.getElementById("checkBtn");
+const applyBtn = document.getElementById("applyBtn");
+
+const eqInput = document.getElementById("eqInput");
+const balInput = document.getElementById("balInput");
+
+const statusText = document.getElementById("statusText");
+const hintText = document.getElementById("hintText");
+const yearsText = document.getElementById("yearsText");
+const totalYearsText = document.getElementById("totalYearsText");
+const histBody = document.getElementById("histBody");
+
+/** ========= Helpers ========= */
+function fmtMoney(n){
+  return n.toLocaleString("en-US", { style:"currency", currency:"USD", minimumFractionDigits:2, maximumFractionDigits:2 });
+}
+function roundCents(n){ return Math.round(n * 100) / 100; }
+function shuffle(arr){
+  const a = arr.slice();
+  for(let i=a.length-1; i>0; i--){
+    const j = Math.floor(Math.random() * (i+1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+function buildMapping(){
+  mappingByIndex = shuffle(storyBank);
+}
+function factorFromStory(story){
+  const p = story.percent / 100;
+  return story.type === "growth" ? (1 + p) : (1 - p);
+}
+function rateString(story){
+  return (story.type === "growth" ? "↑" : "↓") + story.percent + "% per year";
+}
+function updateUI(){
+  moneyDisplay.textContent = fmtMoney(money);
+  turnPill.textContent = `Spins: ${spins}`;
+  totalYearsText.textContent = String(totalYearsInvested);
+}
+
+/** Weighted years: 2–5 most common; 1 and 6 rare */
+function rollWeightedYears(){
+  const bag = [1, 2,2,2, 3,3,3, 4,4,4, 5,5,5, 6];
+  return bag[Math.floor(Math.random() * bag.length)];
+}
+
+/** ========= Equation checking ========= */
+function normalizeEquation(s){
+  return s.toLowerCase().replace(/\s+/g,"").replace(/,/g,"");
+}
+function equationLooksCorrect(eq, aVal, bVal, xVal){
+  const s = normalizeEquation(eq);
+  const aStr = aVal.toFixed(2);
+  const aStrAlt = String(Math.round(aVal));
+  const bStr = bVal.toFixed(2);
+  const xStr = String(xVal);
+
+  const hasA = s.includes(aStr) || s.includes(aStrAlt);
+  const hasB = s.includes(bStr) || s.includes(String(bVal));
+  const hasX = s.includes("^"+xStr) || s.includes("**"+xStr);
+
+  // allow y= or a= (don’t require)
+  const hasMult = s.includes(aStr+"(") || s.includes(aStrAlt+"(") || s.includes(aStr+"*") || s.includes(aStrAlt+"*");
+  const hasParenB = s.includes("("+bStr+")") || s.includes("("+String(bVal)+")");
+
+  if(!(hasA && hasB && hasX)) return false;
+  if(!(hasMult || hasParenB)) return false;
+  return true;
+}
+
+/** =========================================
+ *  Outcome wheel (title labels)
+ *  ========================================= */
+const wheelCanvas = document.getElementById("wheel");
+const wheelCtx = wheelCanvas.getContext("2d");
+const WW = wheelCanvas.width, WH = wheelCanvas.height;
+const wcx = WW/2, wcy = WH/2;
+const wradius = Math.min(WW,WH)/2 - 10;
+
+let wheelRotation = 0;
+let wheelSpinning = false;
+
+function shortLabel(title, maxChars=16){
+  if(title.length <= maxChars) return title;
+  return title.slice(0, maxChars-1) + "…";
+}
+
+function drawOutcomeWheel(){
+  wheelCtx.clearRect(0,0,WW,WH);
+  const n = 20;
+  const slice = (Math.PI*2)/n;
+
+  wheelCtx.beginPath();
+  wheelCtx.arc(wcx,wcy,wradius+2,0,Math.PI*2);
+  wheelCtx.strokeStyle = "rgba(255,255,255,.18)";
+  wheelCtx.lineWidth = 4;
+  wheelCtx.stroke();
+
+  for(let i=0;i<n;i++){
+    const start = wheelRotation + i*slice;
+    const end = start + slice;
+
+    wheelCtx.beginPath();
+    wheelCtx.moveTo(wcx,wcy);
+    wheelCtx.arc(wcx,wcy,wradius,start,end);
+    wheelCtx.closePath();
+    wheelCtx.fillStyle = (i%2===0) ? "rgba(122,162,255,.35)" : "rgba(255,255,255,.10)";
+    wheelCtx.fill();
+
+    wheelCtx.strokeStyle = "rgba(0,0,0,.25)";
+    wheelCtx.lineWidth = 1;
+    wheelCtx.stroke();
+
+    const mid = (start+end)/2;
+    const label = mappingByIndex[i] ? shortLabel(mappingByIndex[i].title, 16) : String(i+1);
+
+    wheelCtx.save();
+    wheelCtx.translate(wcx,wcy);
+    wheelCtx.rotate(mid);
+    wheelCtx.textAlign = "right";
+    wheelCtx.fillStyle = "rgba(231,236,255,.95)";
+    wheelCtx.font = "800 11px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+    wheelCtx.fillText(label, wradius - 12, 4);
+    wheelCtx.restore();
+  }
+
+  wheelCtx.beginPath();
+  wheelCtx.arc(wcx,wcy,62,0,Math.PI*2);
+  wheelCtx.fillStyle = "rgba(0,0,0,.25)";
+  wheelCtx.fill();
+  wheelCtx.strokeStyle = "rgba(255,255,255,.14)";
+  wheelCtx.lineWidth = 2;
+  wheelCtx.stroke();
+
+  wheelCtx.fillStyle = "rgba(231,236,255,.95)";
+  wheelCtx.font = "900 16px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+  wheelCtx.textAlign = "center";
+  wheelCtx.fillText("SPIN", wcx, wcy + 6);
+}
+
+function outcomeIndexFromRotation(rot){
+  const n = 20;
+  const slice = (Math.PI*2)/n;
+  const pointerAngle = -Math.PI/2;
+  let a = pointerAngle - rot;
+  a = ((a % (Math.PI*2)) + (Math.PI*2)) % (Math.PI*2);
+  return Math.floor(a / slice);
+}
+
+function spinOutcome(){
+  if(wheelSpinning || lockedUntilCorrect) return;
+
+  wheelSpinning = true;
+  spinBtn.disabled = true;
+  spinYearsBtn.disabled = true;
+  checkBtn.disabled = true;
+  applyBtn.disabled = true;
+
+  eqInput.value = "";
+  balInput.value = "";
+  years = null;
+  expected = null;
+  yearsText.textContent = "—";
+
+  statusText.textContent = "Spinning outcome...";
+  statusText.className = "status warn";
+  hintText.textContent = "";
+
+  const n = 20;
+  const slice = (Math.PI*2)/n;
+  const pointerAngle = -Math.PI/2;
+  const targetIdx = Math.floor(Math.random() * 20);
+
+  const desiredA = (targetIdx + 0.5) * slice;
+  const baseFinal = pointerAngle - desiredA;
+  const extraSpins = 5 + Math.floor(Math.random() * 4);
+  const finalRot = baseFinal + extraSpins * (Math.PI*2);
+
+  const startRot = wheelRotation;
+  const delta = finalRot - startRot;
+  const duration = 2200;
+  const start = performance.now();
+
+  function easeOutCubic(t){ return 1 - Math.pow(1 - t, 3); }
+
+  function anim(now){
+    const t = Math.min(1, (now - start)/duration);
+    wheelRotation = startRot + delta * easeOutCubic(t);
+    drawOutcomeWheel();
+
+    if(t < 1){
+      requestAnimationFrame(anim);
+    } else {
+      wheelSpinning = false;
+
+      currentIndex = outcomeIndexFromRotation(wheelRotation);
+      currentStory = mappingByIndex[currentIndex];
+
+      resultLine.textContent =
+        `"${currentStory.title}" (${rateString(currentStory)}) – ${currentStory.text}`;
+
+      statusText.textContent = "Now spin YEARS (weighted).";
+      statusText.className = "status warn";
+      spinYearsBtn.disabled = false;
+      spinBtn.disabled = false;
+    }
+  }
+  requestAnimationFrame(anim);
+}
+
+/** =========================================
+ *  Years wheel (smaller + weighted)
+ *  ========================================= */
+const yearsCanvas = document.getElementById("yearsWheel");
+const yearsCtx = yearsCanvas.getContext("2d");
+const YW = yearsCanvas.width, YH = yearsCanvas.height;
+const ycx = YW/2, ycy = YH/2;
+const yradius = Math.min(YW,YH)/2 - 8;
+
+let yearsRotation = 0;
+let yearsSpinning = false;
+
+/**
+ * Weighted wheel segments:
+ * - We show 14 slices (like the bag).
+ * - Values: 1, (2 x3), (3 x3), (4 x3), (5 x3), 6
+ */
+const yearsBag = [1, 2,2,2, 3,3,3, 4,4,4, 5,5,5, 6];
+
+function drawYearsWheel(){
+  yearsCtx.clearRect(0,0,YW,YH);
+  const n = yearsBag.length;
+  const slice = (Math.PI*2)/n;
+
+  yearsCtx.beginPath();
+  yearsCtx.arc(ycx,ycy,yradius+2,0,Math.PI*2);
+  yearsCtx.strokeStyle = "rgba(255,255,255,.18)";
+  yearsCtx.lineWidth = 3;
+  yearsCtx.stroke();
+
+  for(let i=0;i<n;i++){
+    const start = yearsRotation + i*slice;
+    const end = start + slice;
+
+    yearsCtx.beginPath();
+    yearsCtx.moveTo(ycx,ycy);
+    yearsCtx.arc(ycx,ycy,yradius,start,end);
+    yearsCtx.closePath();
+    yearsCtx.fillStyle = (i%2===0) ? "rgba(122,162,255,.25)" : "rgba(255,255,255,.08)";
+    yearsCtx.fill();
+
+    yearsCtx.strokeStyle = "rgba(0,0,0,.22)";
+    yearsCtx.lineWidth = 1;
+    yearsCtx.stroke();
+
+    const mid = (start+end)/2;
+    const label = String(yearsBag[i]);
+
+    yearsCtx.save();
+    yearsCtx.translate(ycx,ycy);
+    yearsCtx.rotate(mid);
+    yearsCtx.textAlign = "right";
+    yearsCtx.fillStyle = "rgba(231,236,255,.95)";
+    yearsCtx.font = "900 14px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+    yearsCtx.fillText(label, yradius - 10, 5);
+    yearsCtx.restore();
+  }
+
+  yearsCtx.beginPath();
+  yearsCtx.arc(ycx,ycy,34,0,Math.PI*2);
+  yearsCtx.fillStyle = "rgba(0,0,0,.25)";
+  yearsCtx.fill();
+  yearsCtx.strokeStyle = "rgba(255,255,255,.14)";
+  yearsCtx.lineWidth = 2;
+  yearsCtx.stroke();
+
+  yearsCtx.fillStyle = "rgba(231,236,255,.95)";
+  yearsCtx.font = "900 12px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+  yearsCtx.textAlign = "center";
+  yearsCtx.fillText("YEARS", ycx, ycy + 4);
+}
+
+function yearsIndexFromRotation(rot){
+  const n = yearsBag.length;
+  const slice = (Math.PI*2)/n;
+  const pointerAngle = -Math.PI/2;
+  let a = pointerAngle - rot;
+  a = ((a % (Math.PI*2)) + (Math.PI*2)) % (Math.PI*2);
+  return Math.floor(a / slice);
+}
+
+function spinYears(){
+  if(yearsSpinning || !currentStory || lockedUntilCorrect) return;
+
+  yearsSpinning = true;
+  spinYearsBtn.disabled = true;
+  checkBtn.disabled = true;
+  applyBtn.disabled = true;
+
+  years = null;
+  expected = null;
+  yearsText.textContent = "—";
+  eqInput.value = "";
+  balInput.value = "";
+
+  statusText.textContent = "Spinning years...";
+  statusText.className = "status warn";
+  hintText.textContent = "";
+
+  // pick target by weighted bag
+  const targetVal = rollWeightedYears();
+
+  // choose any index that matches that value
+  const matching = [];
+  for(let i=0;i<yearsBag.length;i++){
+    if(yearsBag[i] === targetVal) matching.push(i);
+  }
+  const targetIdx = matching[Math.floor(Math.random() * matching.length)];
+
+  const n = yearsBag.length;
+  const slice = (Math.PI*2)/n;
+  const pointerAngle = -Math.PI/2;
+
+  const desiredA = (targetIdx + 0.5) * slice;
+  const baseFinal = pointerAngle - desiredA;
+  const extraSpins = 6 + Math.floor(Math.random() * 4); // 6-9
+  const finalRot = baseFinal + extraSpins * (Math.PI*2);
+
+  const startRot = yearsRotation;
+  const delta = finalRot - startRot;
+  const duration = 1600;
+  const start = performance.now();
+
+  function easeOutCubic(t){ return 1 - Math.pow(1 - t, 3); }
+
+  function anim(now){
+    const t = Math.min(1, (now - start)/duration);
+    yearsRotation = startRot + delta * easeOutCubic(t);
+    drawYearsWheel();
+
+    if(t < 1){
+      requestAnimationFrame(anim);
+    } else {
+      yearsSpinning = false;
+
+      const landedIdx = yearsIndexFromRotation(yearsRotation);
+      years = yearsBag[landedIdx];
+      yearsText.textContent = String(years);
+
+      // compute expected now that we have outcome + years
+      const r = factorFromStory(currentStory);
+      expected = roundCents(money * Math.pow(r, years));
+
+      statusText.textContent = "Enter equation + new balance, then check.";
+      statusText.className = "status warn";
+      hintText.textContent = "Round money to the nearest cent.";
+
+      checkBtn.disabled = false;
+      lockedUntilCorrect = true;
+    }
+  }
+  requestAnimationFrame(anim);
+}
+
+/** ===== Check + Apply ===== */
+function checkAnswer(){
+  if(expected === null || years === null || !currentStory) return;
+
+  const b = factorFromStory(currentStory);
+
+  const eq = eqInput.value.trim();
+  const eqOk = equationLooksCorrect(eq, money, b, years);
+
+  const raw = Number(balInput.value);
+  if(!Number.isFinite(raw)){
+    statusText.textContent = "Enter a balance number first.";
+    statusText.className = "status bad";
+    return;
+  }
+  const student = roundCents(raw);
+  const balOk = Math.abs(student - expected) <= 0.01;
+
+  if(eqOk && balOk){
+    statusText.textContent = "Correct ✅";
+    statusText.className = "status good";
+    hintText.textContent = `Correct value: ${fmtMoney(expected)}. Click “Apply & Next Spin”.`;
+    applyBtn.disabled = false;
+  } else {
+    statusText.textContent = "Not yet ❌";
+    statusText.className = "status bad";
+
+    const msgs = [];
+    if(!eqOk) msgs.push("Equation doesn’t match the needed a, b, and exponent (years).");
+    if(!balOk) msgs.push(`Expected about ${fmtMoney(expected)}.`);
+    hintText.textContent = msgs.join(" ");
+    applyBtn.disabled = true;
+  }
+}
+
+function addHistoryRow({spinNum, years, story, expected, studentEq, studentBal, correct}){
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td class="mono">${spinNum}</td>
+    <td class="mono">${years}</td>
+    <td>
+      <div><strong>${story.title}</strong> <span class="small mono">(${rateString(story)})</span></div>
+      <div class="small">${story.text}</div>
+    </td>
+    <td class="mono">${fmtMoney(expected)}</td>
+    <td>
+      <div class="small mono">${studentEq ? studentEq.replace(/</g,"&lt;") : "—"}</div>
+      <div class="mono">${Number.isFinite(studentBal) ? fmtMoney(studentBal) : "—"}</div>
+      <div class="${correct ? "status good" : "status bad"}">${correct ? "Correct" : "Incorrect"}</div>
+    </td>
+  `;
+  histBody.prepend(tr);
+}
+
+function applyAndNext(){
+  if(expected === null || years === null || !currentStory) return;
+
+  const b = factorFromStory(currentStory);
+
+  const studentEq = eqInput.value.trim();
+  const eqOk = equationLooksCorrect(studentEq, money, b, years);
+
+  const studentBal = roundCents(Number(balInput.value));
+  const balOk = Number.isFinite(studentBal) && Math.abs(studentBal - expected) <= 0.01;
+
+  const correct = eqOk && balOk;
+
+  addHistoryRow({
+    spinNum: spins + 1,
+    years,
+    story: currentStory,
+    expected,
+    studentEq,
+    studentBal,
+    correct
+  });
+
+  if(!correct){
+    statusText.textContent = "Can’t apply — answer not correct.";
+    statusText.className = "status bad";
+    return;
+  }
+
+  totalYearsInvested += years;
+  money = expected;
+  spins += 1;
+  updateUI();
+
+  // reset for next spin
+  currentIndex = null;
+  currentStory = null;
+  years = null;
+  expected = null;
+  lockedUntilCorrect = false;
+
+  resultLine.textContent = "Spin again.";
+  yearsText.textContent = "—";
+  eqInput.value = "";
+  balInput.value = "";
+  hintText.textContent = "";
+  statusText.textContent = "Ready.";
+  statusText.className = "status";
+
+  checkBtn.disabled = true;
+  applyBtn.disabled = true;
+  spinYearsBtn.disabled = true;
+
+  drawOutcomeWheel();
+}
+
+/** ===== Reset ===== */
+function resetGame(){
+  buildMapping();
+  money = 1_000_000.00;
+  spins = 0;
+  totalYearsInvested = 0;
+
+  currentIndex = null;
+  currentStory = null;
+  years = null;
+  expected = null;
+  lockedUntilCorrect = false;
+
+  wheelRotation = 0;
+  yearsRotation = 0;
+
+  drawOutcomeWheel();
+  drawYearsWheel();
+
+  resultLine.textContent = "Spin to begin.";
+  yearsText.textContent = "—";
+  eqInput.value = "";
+  balInput.value = "";
+  hintText.textContent = "";
+  statusText.textContent = "—";
+  statusText.className = "status";
+
+  checkBtn.disabled = true;
+  applyBtn.disabled = true;
+  spinYearsBtn.disabled = true;
+  spinBtn.disabled = false;
+
+  histBody.innerHTML = "";
+  updateUI();
+}
+
+/** ===== Wire up ===== */
+spinBtn.addEventListener("click", spinOutcome);
+spinYearsBtn.addEventListener("click", spinYears);
+checkBtn.addEventListener("click", checkAnswer);
+applyBtn.addEventListener("click", applyAndNext);
+resetBtn.addEventListener("click", resetGame);
+
+balInput.addEventListener("keydown", (e)=>{ if(e.key==="Enter" && !checkBtn.disabled) checkAnswer(); });
+eqInput.addEventListener("keydown", (e)=>{ if(e.key==="Enter" && !checkBtn.disabled) checkAnswer(); });
+
+/** ===== Init ===== */
+buildMapping();
+drawOutcomeWheel();
+drawYearsWheel();
+updateUI();
+</script>
+</body>
+</html>
